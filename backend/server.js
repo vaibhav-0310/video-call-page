@@ -1,34 +1,74 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const http = require("http");
+
 const app = express();
 app.use(cors());
-const server = require("http").createServer(app);
+
+const server = http.createServer(app);
 const io = require("socket.io")(server, {
-  cors: { origin: "http://127.0.0.1/:5173" },
+  cors: {
+    origin: "http://localhost:5173",
+    methods: ["GET", "POST"],
+  },
 });
-const PORT = 3000 || process.env.PORT;
+
+const PORT = process.env.PORT || 3000;
+
+// Store user states
+const userStates = new Map();
+
 io.on("connection", (socket) => {
-  console.log("Connected");
+  console.log("Client connected:", socket.id);
+  
+  // Initialize user state
+  userStates.set(socket.id, {
+    videoEnabled: true,
+    audioEnabled: true
+  });
 
   socket.on("message", (message) => {
+    // Append sender ID to every message
+    message.from = socket.id;
+    
+    // Handle state updates
+    const userState = userStates.get(socket.id);
+    if (userState) {
+      switch (message.type) {
+        case "video-toggle":
+          userState.videoEnabled = message.enabled;
+          userStates.set(socket.id, userState);
+          break;
+        case "audio-toggle":
+          userState.audioEnabled = message.enabled;
+          userStates.set(socket.id, userState);
+          break;
+      }
+    }
+    
+    // Broadcast message to other clients (not back to sender)
     socket.broadcast.emit("message", message);
   });
 
   socket.on("disconnect", () => {
-    console.log("Disconnected");
+    console.log("Client disconnected:", socket.id);
+    // Clean up user state
+    userStates.delete(socket.id);
+    
+    // Notify other clients that this user left
+    socket.broadcast.emit("message", { 
+      type: "bye", 
+      from: socket.id 
+    });
   });
 });
 
-function error(err, req, res, next) {
-  // log it
-  if (!test) console.error(err.stack);
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send("Internal Server Error");
+});
 
-  // respond with 500 "Internal Server Error".
-  res.status(500);
-  res.send("Internal Server Error");
-}
-app.use(error);
-server.listen(3000, () => {
-  console.log("listening on Port 3000");
+server.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
 });
